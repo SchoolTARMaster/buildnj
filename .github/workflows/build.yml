@@ -34,8 +34,8 @@ jobs:
             alternatives --set python3 /usr/bin/python3.11
             source /opt/rh/gcc-toolset-13/enable
             
-            # 2. Clone (using v26.1.0 which is now current) [1]
-            git clone --branch v26.1.0 --depth 1 https://github.com node-src
+            # 2. Clone
+            git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
             cd node-src
             
             # 3. Configure & Build
