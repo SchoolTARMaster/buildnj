@@ -1,4 +1,4 @@
-name: Build Node.js Portable (Storage-Safe)
+name: Build Node.js Portable
 
 on:
   workflow_dispatch:
@@ -6,58 +6,58 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Using the native container field is more stable than the docker-run-action
-    container:
-      image: almalinux:8
-    
     steps:
-      - name: Free Disk Space
-        # This MUST run inside the container to clear the shared workspace disk
-        run: |
-          rm -rf /usr/share/dotnet
-          rm -rf /usr/local/lib/android
-          rm -rf /opt/ghc
-          df -h
+      # Step 1: Clean the HOST (Ubuntu)
+      - name: Free Disk Space (Ubuntu Host)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
-      - name: Install System Dependencies
-        run: |
-          dnf install -y epel-release
-          dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
-          alternatives --set python3 /usr/bin/python3.11
-
-      - name: Build Node.js
-        run: |
-          # 1. Enable GCC 13.2
-          source /opt/rh/gcc-toolset-13/enable
-          gcc --version
-          
-          # 2. Clone
-          git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
-          cd node-src
-          
-          # 3. Configure & Build
-          export LDFLAGS="-static-libstdc++ -static-libgcc"
-          ./configure --experimental-quic --prefix=/
-          make -j$(nproc)
-          
-          # 4. Stage & Flatten
-          mkdir -p /github/home/final
-          make install DESTDIR=/github/home/staging
-          
-          # Move files to flatten structure
-          mv /github/home/staging/usr/local/* /github/home/final/
-          
-          # 5. Shrink
-          strip /github/home/final/bin/node
-          rm -rf /github/home/final/share/man
-          
-          # 6. Archive
-          cd /github/home/final
-          tar -czvf /github/home/node-portable.tar.gz .
+      # Step 2: Build inside the CONTAINER (AlmaLinux)
+      - name: Build in AlmaLinux 8
+        uses: addnab/docker-run-action@v3
+        with:
+          image: almalinux:8
+          # The key fix for your previous 'access denied' error:
+          # We use a simple image name and map the current workspace
+          options: -v ${{ github.workspace }}:/workspace
+          run: |
+            # 1. Setup Environment
+            dnf install -y epel-release
+            dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
+            alternatives --set python3 /usr/bin/python3.11
+            source /opt/rh/gcc-toolset-13/enable
+            
+            # 2. Clone (using v26.1.0 which is now current) [1]
+            git clone --branch v26.1.0 --depth 1 https://github.com node-src
+            cd node-src
+            
+            # 3. Configure & Build
+            export LDFLAGS="-static-libstdc++ -static-libgcc"
+            ./configure --experimental-quic --prefix=/
+            make -j$(nproc)
+            
+            # 4. Stage & Flatten
+            mkdir -p /workspace/final
+            make install DESTDIR=/workspace/staging
+            mv /workspace/staging/usr/local/* /workspace/final/
+            
+            # 5. Shrink & Cleanup
+            strip /workspace/final/bin/node
+            rm -rf /workspace/final/share/man
+            
+            # 6. Create Tarball
+            cd /workspace/final
+            tar -czvf /workspace/node-v26.1.0-portable.tar.gz .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-linux-x64-portable
-          # Artifacts must be picked up from the workspace/home area
-          path: /github/home/node-portable.tar.gz
+          name: node-v26.1.0-linux-x64
+          path: node-v26.1.0-portable.tar.gz
