@@ -1,4 +1,4 @@
-name: Build Node.js Portable (Fixed)
+name: Build Node.js Main (QUIC/HTTP3 - Auto-Find)
 
 on:
   workflow_dispatch:
@@ -7,8 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Clear the host disk (Crucial for Node.js build)
-      - name: Free Disk Space
+      - name: Maximize Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -19,10 +18,9 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Step 2: Use native Docker command to avoid the 'access denied' bug
       - name: Build in AlmaLinux 8
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace almalinux:8 bash -c "
+          docker run --rm -v ${{ github.workspace }}:/work almalinux:8 bash -c "
             # 1. Setup Environment
             dnf install -y epel-release
             dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
@@ -38,22 +36,36 @@ jobs:
             ./configure --experimental-quic --prefix=/
             make -j\$(nproc)
             
-            # 4. Stage and Flatten
-            mkdir -p /workspace/final
-            make install DESTDIR=/workspace/staging
-            mv /workspace/staging/usr/local/* /workspace/final/
+            # 4. Staging
+            mkdir -p /work/staging
+            make install DESTDIR=/work/staging
             
-            # 5. Shrink & Cleanup
-            strip /workspace/final/bin/node
-            rm -rf /workspace/final/share/man
+            # 5. Search and Rescue Logic
+            echo 'Searching for the node binary...'
+            NODE_PATH=\$(find /work/staging -name node -type f -executable | grep 'bin/node' | head -n 1)
             
-            # 6. Create Tarball
-            cd /workspace/final
-            tar -czvf /workspace/node-v26-portable.tar.gz .
+            if [ -z \"\$NODE_PATH\" ]; then
+              echo 'ERROR: Could not find node binary anywhere in /work/staging!'
+              exit 1
+            fi
+            
+            # Get the parent directory of 'bin/node' (the actual root of the install)
+            INSTALL_ROOT=\$(dirname \$(dirname \"\$NODE_PATH\"))
+            echo \"Found install root at: \$INSTALL_ROOT\"
+            
+            # 6. Shrink & Cleanup
+            strip \"\$NODE_PATH\"
+            
+            # 7. Create Tarball from the discovered root
+            cd \"\$INSTALL_ROOT\"
+            echo 'Contents to be tarred:'
+            ls -R .
+            tar -cvzf /work/node-main-linux-x64.tar.gz .
           "
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-v26-linux-x64
-          path: node-v26-portable.tar.gz
+          name: node-main-http3
+          path: ${{ github.workspace }}/node-main-linux-x64.tar.gz
+          if-no-files-found: error
