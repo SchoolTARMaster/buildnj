@@ -1,4 +1,4 @@
-name: Build Node.js Main (QUIC + Snapshots)
+name: Build Node.js Portable (Storage-Safe)
 
 on:
   workflow_dispatch:
@@ -6,61 +6,58 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Using the native container field is more stable than the docker-run-action
+    container:
+      image: almalinux:8
+    
     steps:
-      - name: Free Disk Space (Aggressive)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+      - name: Free Disk Space
+        # This MUST run inside the container to clear the shared workspace disk
+        run: |
+          rm -rf /usr/share/dotnet
+          rm -rf /usr/local/lib/android
+          rm -rf /opt/ghc
+          df -h
 
-      - name: Build in AlmaLinux 8
-        uses: addnab/docker-run-action@v3
-        with:
-          image: almalinux:8
-          options: -v ${{ github.workspace }}:/dist
-          run: |
-            # 1. Setup Environment
-            dnf install -y epel-release
-            dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
-            alternatives --set python3 /usr/bin/python3.11
-            source /opt/rh/gcc-toolset-13/enable
-            
-            # Verify GCC version (Should be 13.2.1)
-            gcc --version
-            
-            # 2. Clone Main Branch
-            git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
-            cd node-src
-            
-            # 3. Configure & Build
-            # -static-libgcc is the correct flag for static libgcc.a
-            export LDFLAGS="-static-libstdc++ -static-libgcc"
-            ./configure --experimental-quic --prefix=/
-            
-            make -j$(nproc)
-            
-            # 4. Staging (Use DESTDIR for the temporary location)
-            mkdir -p /dist/final
-            make install DESTDIR=/dist/staging
-            
-            # 5. Flatten the structure
-            mv /dist/staging/* /dist/final/
-            
-            # 6. Shrink & Cleanup
-            strip /dist/final/bin/node
-            rm -rf /dist/final/share/man
-            
-            # 7. Create Tarball
-            cd /dist/final
-            tar -czvf /dist/node-main-snapshot.tar.gz .
+      - name: Install System Dependencies
+        run: |
+          dnf install -y epel-release
+          dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
+          alternatives --set python3 /usr/bin/python3.11
+
+      - name: Build Node.js
+        run: |
+          # 1. Enable GCC 13.2
+          source /opt/rh/gcc-toolset-13/enable
+          gcc --version
+          
+          # 2. Clone
+          git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
+          cd node-src
+          
+          # 3. Configure & Build
+          export LDFLAGS="-static-libstdc++ -static-libgcc"
+          ./configure --experimental-quic --prefix=/
+          make -j$(nproc)
+          
+          # 4. Stage & Flatten
+          mkdir -p /github/home/final
+          make install DESTDIR=/github/home/staging
+          
+          # Move files to flatten structure
+          mv /github/home/staging/usr/local/* /github/home/final/
+          
+          # 5. Shrink
+          strip /github/home/final/bin/node
+          rm -rf /github/home/final/share/man
+          
+          # 6. Archive
+          cd /github/home/final
+          tar -czvf /github/home/node-portable.tar.gz .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-main-linux-x64-snapshot
-          path: node-main-snapshot.tar.gz
+          name: node-linux-x64-portable
+          # Artifacts must be picked up from the workspace/home area
+          path: /github/home/node-portable.tar.gz
