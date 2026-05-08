@@ -1,0 +1,66 @@
+name: Build Node.js Main (QUIC + Snapshots)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space (Aggressive)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Build in AlmaLinux 8
+        uses: addnab/docker-run-action@v3
+        with:
+          image: almalinux:8
+          options: -v ${{ github.workspace }}:/dist
+          run: |
+            # 1. Setup Environment
+            dnf install -y epel-release
+            dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
+            alternatives --set python3 /usr/bin/python3.11
+            source /opt/rh/gcc-toolset-13/enable
+            
+            # Verify GCC version (Should be 13.2.1)
+            gcc --version
+            
+            # 2. Clone Main Branch
+            git clone --branch main --depth 1 https://github.com node-src
+            cd node-src
+            
+            # 3. Configure & Build
+            # -static-libgcc is the correct flag for static libgcc.a
+            export LDFLAGS="-static-libstdc++ -static-libgcc"
+            ./configure --experimental-quic --prefix=/
+            
+            make -j$(nproc)
+            
+            # 4. Staging (Use DESTDIR for the temporary location)
+            mkdir -p /dist/final
+            make install DESTDIR=/dist/staging
+            
+            # 5. Flatten the structure
+            mv /dist/staging/* /dist/final/
+            
+            # 6. Shrink & Cleanup
+            strip /dist/final/bin/node
+            rm -rf /dist/final/share/man
+            
+            # 7. Create Tarball
+            cd /dist/final
+            tar -czvf /dist/node-main-snapshot.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-main-linux-x64-snapshot
+          path: node-main-snapshot.tar.gz
