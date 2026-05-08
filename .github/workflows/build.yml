@@ -1,4 +1,4 @@
-name: Build Node.js Portable
+name: Build Node.js Portable (Fixed)
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Clean the HOST (Ubuntu)
-      - name: Free Disk Space (Ubuntu Host)
+      # Step 1: Clear the host disk (Crucial for Node.js build)
+      - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -19,31 +19,26 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Step 2: Build inside the CONTAINER (AlmaLinux)
+      # Step 2: Use native Docker command to avoid the 'access denied' bug
       - name: Build in AlmaLinux 8
-        uses: addnab/docker-run-action@v3
-        with:
-          image: almalinux:8
-          # The key fix for your previous 'access denied' error:
-          # We use a simple image name and map the current workspace
-          options: -v ${{ github.workspace }}:/workspace
-          run: |
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace almalinux:8 bash -c "
             # 1. Setup Environment
             dnf install -y epel-release
             dnf install -y gcc-toolset-13 make libatomic python3.11 python3.11-devel git xz binutils
             alternatives --set python3 /usr/bin/python3.11
             source /opt/rh/gcc-toolset-13/enable
             
-            # 2. Clone
+            # 2. Clone Main Branch
             git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
             cd node-src
             
             # 3. Configure & Build
-            export LDFLAGS="-static-libstdc++ -static-libgcc"
+            export LDFLAGS='-static-libstdc++ -static-libgcc'
             ./configure --experimental-quic --prefix=/
-            make -j$(nproc)
+            make -j\$(nproc)
             
-            # 4. Stage & Flatten
+            # 4. Stage and Flatten
             mkdir -p /workspace/final
             make install DESTDIR=/workspace/staging
             mv /workspace/staging/usr/local/* /workspace/final/
@@ -54,10 +49,11 @@ jobs:
             
             # 6. Create Tarball
             cd /workspace/final
-            tar -czvf /workspace/node-v26.1.0-portable.tar.gz .
+            tar -czvf /workspace/node-v26-portable.tar.gz .
+          "
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-v26.1.0-linux-x64
-          path: node-v26.1.0-portable.tar.gz
+          name: node-v26-linux-x64
+          path: node-v26-portable.tar.gz
