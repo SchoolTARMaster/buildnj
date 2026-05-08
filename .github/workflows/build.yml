@@ -34,7 +34,7 @@ jobs:
             gcc --version
             
             # 2. Clone Main Branch
-            git clone --branch main --depth 1 https://github.com node-src
+            git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
             cd node-src
             
             # 3. Configure & Build
