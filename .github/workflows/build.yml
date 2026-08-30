@@ -28,7 +28,7 @@ jobs:
             source /opt/rh/gcc-toolset-13/enable
             
             # 2. Clone Main Branch
-            git clone --branch main --depth 1 https://github.com/nodejs/node.git node-src
+            git clone --branch v26.8.1 --depth 1 https://github.com/nodejs/node.git node-src
             cd node-src
             
             # 3. Configure & Build
